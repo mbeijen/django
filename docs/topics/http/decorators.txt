@@ -41,6 +41,13 @@ a :class:`django.http.HttpResponseNotAllowed` if the conditions are not met.
 
     Decorator to require that a view only accepts the POST method.
 
+.. function:: require_QUERY()
+
+    .. versionadded:: 6.2
+
+    Decorator to require that a view only accepts the ``QUERY`` method
+    (:rfc:`10008`).
+
 .. function:: require_safe()
 
     Decorator to require that a view only accepts the GET, HEAD, and QUERY

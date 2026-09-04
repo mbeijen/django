@@ -23,7 +23,7 @@ Django's ``LocaleMiddleware``.
 
 More details about how the caching works:
 
-* Only GET or HEAD-requests with status code 200 are cached.
+* Only GET, HEAD, or QUERY requests with status code 200 are cached.
 
 * The number of seconds each page is stored for is set by the "max-age" section
   of the response's "Cache-Control" header, falling back to the
@@ -167,12 +167,17 @@ class FetchFromCacheMiddleware(MiddlewareMixin):
         Check whether the page is already cached and return the cached
         version if available.
         """
-        if request.method not in ("GET", "HEAD"):
+        if request.method not in ("GET", "HEAD", "QUERY"):
             request._cache_update_cache = False
             return None  # Don't bother checking the cache.
 
-        # try and get the cached GET response
-        cache_key = get_cache_key(request, self.key_prefix, "GET", cache=self.cache)
+        # QUERY responses are keyed on their own (the request content is
+        # part of the key), so they don't share GET's cache entries.
+        lookup_method = "QUERY" if request.method == "QUERY" else "GET"
+        # try and get the cached GET (or QUERY) response
+        cache_key = get_cache_key(
+            request, self.key_prefix, lookup_method, cache=self.cache
+        )
         if cache_key is None:
             request._cache_update_cache = True
             return None  # No cache information available, need to rebuild.

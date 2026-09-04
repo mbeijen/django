@@ -2373,6 +2373,46 @@ class CacheUtils(SimpleTestCase):
             "beaf87a9a99ee81c673ea2d67ccbec2a.d41d8cd98f00b204e9800998ecf8427e",
         )
 
+    def test_get_cache_key_query_method(self):
+        """
+        The cache key for a QUERY request incorporates the request content
+        (RFC 10008, Section 2.7).
+        """
+        request = self.factory.query(self.path, "field = 'test'")
+        # Expect None if no headers have been set yet.
+        self.assertIsNone(get_cache_key(request, method="QUERY"))
+        learn_cache_key(request, HttpResponse())
+        same_content = self.factory.query(self.path, "field = 'test'")
+        self.assertEqual(
+            get_cache_key(request, method="QUERY"),
+            get_cache_key(same_content, method="QUERY"),
+        )
+        other_content = self.factory.query(self.path, "field = 'other'")
+        self.assertNotEqual(
+            get_cache_key(request, method="QUERY"),
+            get_cache_key(other_content, method="QUERY"),
+        )
+
+    def test_query_cache_key_varies_by_content_type(self):
+        request = self.factory.query(self.path, "a", content_type="text/plain")
+        learn_cache_key(request, HttpResponse())
+        other_content_type = self.factory.query(
+            self.path, "a", content_type="application/sql"
+        )
+        self.assertNotEqual(
+            get_cache_key(request, method="QUERY"),
+            get_cache_key(other_content_type, method="QUERY"),
+        )
+
+    def test_query_cache_key_differs_from_get(self):
+        get_request = self.factory.get(self.path)
+        learn_cache_key(get_request, HttpResponse())
+        query_request = self.factory.query(self.path)
+        self.assertNotEqual(
+            get_cache_key(get_request),
+            get_cache_key(query_request, method="QUERY"),
+        )
+
     def test_cache_key_varies_by_url(self):
         """
         get_cache_key keys differ by fully-qualified URL instead of path
@@ -2587,6 +2627,87 @@ class CacheHEADTest(SimpleTestCase):
         )
         self.assertIsNotNone(get_cache_data)
         self.assertEqual(test_content.encode(), get_cache_data.content)
+
+
+@override_settings(
+    CACHE_MIDDLEWARE_SECONDS=60,
+    CACHE_MIDDLEWARE_KEY_PREFIX="test",
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        },
+    },
+)
+class CacheQUERYTest(SimpleTestCase):
+    path = "/cache/test/"
+    factory = RequestFactory()
+
+    def tearDown(self):
+        cache.clear()
+
+    def _set_cache(self, request, msg):
+        request._cache_update_cache = True
+        return UpdateCacheMiddleware(lambda req: HttpResponse(msg))(request)
+
+    def test_query_caches_correctly(self):
+        test_content = "test content"
+        self._set_cache(self.factory.query(self.path, "field = 'test'"), test_content)
+
+        request = self.factory.query(self.path, "field = 'test'")
+        get_cache_data = FetchFromCacheMiddleware(empty_response).process_request(
+            request
+        )
+        self.assertIsNotNone(get_cache_data)
+        self.assertEqual(test_content.encode(), get_cache_data.content)
+
+    def test_query_with_different_content(self):
+        """
+        QUERY requests to the same URL with different content are cached
+        separately.
+        """
+        self._set_cache(self.factory.query(self.path, "field = 'test'"), "test content")
+
+        request = self.factory.query(self.path, "field = 'other'")
+        get_cache_data = FetchFromCacheMiddleware(empty_response).process_request(
+            request
+        )
+        self.assertIsNone(get_cache_data)
+
+    def test_query_with_different_content_type(self):
+        self._set_cache(
+            self.factory.query(self.path, "field = 'test'", content_type="text/plain"),
+            "test content",
+        )
+
+        request = self.factory.query(
+            self.path, "field = 'test'", content_type="application/sql"
+        )
+        get_cache_data = FetchFromCacheMiddleware(empty_response).process_request(
+            request
+        )
+        self.assertIsNone(get_cache_data)
+
+    def test_query_with_cached_get(self):
+        """
+        Unlike HEAD, a QUERY request is not answered with a cached GET
+        response for the same URL.
+        """
+        self._set_cache(self.factory.get(self.path), "test content")
+
+        request = self.factory.query(self.path)
+        get_cache_data = FetchFromCacheMiddleware(empty_response).process_request(
+            request
+        )
+        self.assertIsNone(get_cache_data)
+
+    def test_get_with_cached_query(self):
+        self._set_cache(self.factory.query(self.path, "field = 'test'"), "test content")
+
+        request = self.factory.get(self.path)
+        get_cache_data = FetchFromCacheMiddleware(empty_response).process_request(
+            request
+        )
+        self.assertIsNone(get_cache_data)
 
 
 @override_settings(

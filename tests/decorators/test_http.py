@@ -7,6 +7,7 @@ from django.views.decorators.http import (
     condition,
     conditional_page,
     require_http_methods,
+    require_QUERY,
     require_safe,
 )
 
@@ -103,6 +104,21 @@ class RequireSafeDecoratorTest(SimpleTestCase):
         self.assertIs(type(await async_view(request)), HttpResponseNotAllowed)
         request.method = "DELETE"
         self.assertIs(type(await async_view(request)), HttpResponseNotAllowed)
+
+
+class RequireQueryDecoratorTest(SimpleTestCase):
+    def test_require_query_accepts_only_query_method(self):
+        @require_QUERY
+        def my_view(request):
+            return HttpResponse("OK")
+
+        request = HttpRequest()
+        request.method = "QUERY"
+        self.assertIs(type(my_view(request)), HttpResponse)
+        request.method = "GET"
+        self.assertIs(type(my_view(request)), HttpResponseNotAllowed)
+        request.method = "POST"
+        self.assertIs(type(my_view(request)), HttpResponseNotAllowed)
 
 
 class ConditionDecoratorTest(SimpleTestCase):
